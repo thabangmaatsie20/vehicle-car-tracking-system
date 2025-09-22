@@ -3,6 +3,689 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vehicle Security Dashboard</title>
+
+    <!-- Bootstrap 5 -->
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+      crossorigin="anonymous"
+    />
+    <!-- Bootstrap Icons -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css"
+    />
+    <!-- Leaflet -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
+    <style>
+      :root {
+        --bg-dark: #0e0f12;
+        --card-dark: #151821;
+        --text-muted: #a0a6b2;
+        --success: #20c997;
+        --danger: #ff5c77;
+        --warning: #f7b84b;
+      }
+      body {
+        background: radial-gradient(1200px 800px at 10% -10%, #141824, transparent),
+          radial-gradient(1200px 800px at 90% 110%, #141824, transparent), var(--bg-dark);
+        color: #e6e6e6;
+        min-height: 100vh;
+      }
+      .navbar-brand span {
+        color: #8ab4ff;
+      }
+      .card {
+        background-color: var(--card-dark);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      .card-header {
+        background-color: rgba(255, 255, 255, 0.03);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      .map-container {
+        height: 460px;
+        border-radius: 0.75rem;
+        overflow: hidden;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      }
+      #map {
+        height: 100%;
+        width: 100%;
+      }
+      .table thead th {
+        color: #c9cdd6;
+      }
+      .table > :not(caption) > * > * {
+        background-color: transparent !important;
+        border-bottom-color: rgba(255, 255, 255, 0.08);
+      }
+      .table-danger {
+        background-color: rgba(255, 92, 119, 0.12) !important;
+      }
+      .status-badge {
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.5rem;
+      }
+      .status-success { color: var(--success); background-color: rgba(32, 201, 151, 0.12); }
+      .status-danger { color: var(--danger); background-color: rgba(255, 92, 119, 0.12); }
+      .status-warning { color: var(--warning); background-color: rgba(247, 184, 75, 0.12); }
+
+      .spinner-wrap {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: var(--text-muted);
+      }
+
+      .small-muted { color: var(--text-muted); font-size: 0.9rem; }
+      .xsmall-muted { color: var(--text-muted); font-size: 0.8rem; }
+
+      @media (max-width: 576px) {
+        .map-container { height: 360px; }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="navbar navbar-expand-lg border-bottom" style="background: rgba(20,24,36,0.7); backdrop-filter: blur(8px);">
+      <div class="container-fluid">
+        <a class="navbar-brand fw-semibold" href="#">
+          <i class="bi bi-shield-lock me-2"></i>
+          Vehicle Security <span>Dashboard</span>
+        </a>
+        <div class="d-flex align-items-center gap-3 ms-auto">
+          <div class="xsmall-muted" id="lastUpdateGlobal">Last update: —</div>
+          <button id="refreshBtn" class="btn btn-sm btn-outline-light">
+            <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <main class="container-fluid py-3 py-md-4">
+      <!-- Map Row -->
+      <div class="row g-3 g-md-4">
+        <div class="col-12">
+          <div class="map-container position-relative">
+            <div id="map"></div>
+            <div id="mapSpinner" class="position-absolute top-0 end-0 m-2 spinner-wrap">
+              <div class="spinner-border spinner-border-sm text-light" role="status"></div>
+              <span class="xsmall-muted">Loading map...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Status Cards Row -->
+      <div class="row g-3 g-md-4 mt-1">
+        <div class="col-12 col-lg-4">
+          <div class="card h-100">
+            <div class="card-header d-flex align-items-center justify-content-between py-2">
+              <div class="fw-semibold"><i class="bi bi-unlock me-2"></i>Access Status</div>
+              <span id="accessStatusBadge" class="status-badge status-warning">Checking...</span>
+            </div>
+            <div class="card-body">
+              <div class="d-flex align-items-center gap-3">
+                <div id="accessIcon" class="display-6"><i class="bi bi-hourglass-split text-warning"></i></div>
+                <div>
+                  <div id="accessStatusText" class="fs-5">—</div>
+                  <div class="xsmall-muted" id="vehicleOnlineText">Status: Unknown</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-lg-4">
+          <div class="card h-100">
+            <div class="card-header d-flex align-items-center justify-content-between py-2">
+              <div class="fw-semibold"><i class="bi bi-exclamation-triangle me-2"></i>Intrusion Monitor</div>
+              <span id="intruderBadge" class="status-badge status-warning">Monitoring...</span>
+            </div>
+            <div class="card-body">
+              <div class="d-flex align-items-center gap-3">
+                <div class="display-6" id="intruderIcon"><i class="bi bi-bell text-warning"></i></div>
+                <div>
+                  <div id="intruderText" class="fs-5">No recent data</div>
+                  <div class="xsmall-muted" id="intruderMeta">—</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-lg-4">
+          <div class="card h-100">
+            <div class="card-header d-flex align-items-center justify-content-between py-2">
+              <div class="fw-semibold"><i class="bi bi-geo-alt me-2"></i>Location</div>
+              <span id="locationBadge" class="status-badge status-warning">Waiting GPS...</span>
+            </div>
+            <div class="card-body">
+              <div class="row g-3">
+                <div class="col-6">
+                  <div class="xsmall-muted">Latitude</div>
+                  <div id="latValue" class="fs-6">—</div>
+                </div>
+                <div class="col-6">
+                  <div class="xsmall-muted">Longitude</div>
+                  <div id="lngValue" class="fs-6">—</div>
+                </div>
+              </div>
+              <div class="mt-2 xsmall-muted" id="gpsMeta">GPS: Initializing</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts and Log Row -->
+      <div class="row g-3 g-md-4 mt-1">
+        <div class="col-12 col-xl-6">
+          <div class="card h-100">
+            <div class="card-header py-2 d-flex align-items-center justify-content-between">
+              <div class="fw-semibold"><i class="bi bi-graph-up-arrow me-2"></i>Location History (Last 10)</div>
+              <div id="chartSpinner" class="spinner-wrap">
+                <div class="spinner-border spinner-border-sm text-light" role="status"></div>
+                <span class="xsmall-muted">Loading...</span>
+              </div>
+            </div>
+            <div class="card-body">
+              <canvas id="lineChart" height="150"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-xl-6">
+          <div class="card h-100">
+            <div class="card-header py-2 d-flex align-items-center justify-content-between">
+              <div class="fw-semibold"><i class="bi bi-pie-chart me-2"></i>Access Stats (Last Hour)</div>
+              <div id="pieSpinner" class="spinner-wrap">
+                <div class="spinner-border spinner-border-sm text-light" role="status"></div>
+                <span class="xsmall-muted">Loading...</span>
+              </div>
+            </div>
+            <div class="card-body">
+              <canvas id="pieChart" height="150"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 g-md-4 mt-1">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header py-2 d-flex align-items-center justify-content-between">
+              <div class="fw-semibold"><i class="bi bi-list-check me-2"></i>Event Log (Last 20)</div>
+              <div id="logSpinner" class="spinner-wrap">
+                <div class="spinner-border spinner-border-sm text-light" role="status"></div>
+                <span class="xsmall-muted">Loading...</span>
+              </div>
+            </div>
+            <div class="card-body p-0">
+              <div class="table-responsive" style="max-height: 320px;">
+                <table class="table table-hover table-sm align-middle mb-0">
+                  <thead class="sticky-top" style="background: rgba(255,255,255,0.02);">
+                    <tr>
+                      <th style="width: 22%;">Timestamp</th>
+                      <th style="width: 18%;">Latitude</th>
+                      <th style="width: 18%;">Longitude</th>
+                      <th style="width: 14%;">Access</th>
+                      <th style="width: 28%;">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody id="eventLogBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Vendor Scripts -->
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+
+    <script>
+      // ===============================
+      // CONFIGURATION
+      // ===============================
+      // Replace with your ThingSpeak channel details or supply via URL params (?channelId=...&apiKey=...)
+      const DEFAULT_CHANNEL_ID = '1234567'; // Example Channel ID
+      const DEFAULT_READ_API_KEY = 'ABCDEFGHIJKLMNOP'; // Example Read API Key (public/read-only)
+
+      // Polling interval in milliseconds
+      const POLL_INTERVAL_MS = 15000; // 15 seconds
+
+      // Map defaults (centered broadly on South Africa)
+      const MAP_INITIAL_CENTER = { lat: -30, lng: 25 };
+      const MAP_INITIAL_ZOOM = 5;
+
+      // Enable simple demo mode by appending ?demo=1 to the URL (uses synthetic data if API fails)
+      const urlParams = new URLSearchParams(window.location.search);
+      const DEMO_MODE = urlParams.get('demo') === '1';
+      const CHANNEL_ID = urlParams.get('channelId') || DEFAULT_CHANNEL_ID;
+      const READ_API_KEY = urlParams.get('apiKey') || DEFAULT_READ_API_KEY;
+
+      // ===============================
+      // UTILITIES
+      // ===============================
+      function parseNumber(value) {
+        if (value === null || value === undefined) return null;
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+      }
+
+      function formatDate(d) {
+        try {
+          const date = d instanceof Date ? d : new Date(d);
+          if (Number.isNaN(date.getTime())) return 'Invalid date';
+          return date.toLocaleString(undefined, {
+            year: 'numeric', month: 'short', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+          });
+        } catch (e) { return '—'; }
+      }
+
+      function byLatestAscending(a, b) {
+        return new Date(a.created_at) - new Date(b.created_at);
+      }
+
+      function byLatestDescending(a, b) {
+        return new Date(b.created_at) - new Date(a.created_at);
+      }
+
+      function setText(el, text) {
+        if (!el) return;
+        el.textContent = text;
+      }
+
+      function show(el) { if (el) el.classList.remove('d-none'); }
+      function hide(el) { if (el) el.classList.add('d-none'); }
+
+      function setBadge(el, text, type) {
+        if (!el) return;
+        el.className = 'status-badge ' + (type === 'success' ? 'status-success' : type === 'danger' ? 'status-danger' : 'status-warning');
+        el.textContent = text;
+      }
+
+      function createNote(text, colorClass) {
+        return `<span class="badge ${colorClass}" style="font-weight:500;">${text}</span>`;
+      }
+
+      // ===============================
+      // THINGSPEAK API
+      // ===============================
+      const TS_BASE = `https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.json`;
+      async function fetchFeeds(params) {
+        const u = new URL(TS_BASE);
+        // Append API key even for public channel; harmless if not required
+        u.searchParams.set('api_key', READ_API_KEY);
+        Object.entries(params || {}).forEach(([k, v]) => u.searchParams.set(k, v));
+        const res = await fetch(u.toString(), { cache: 'no-store' });
+        if (!res.ok) throw new Error(`ThingSpeak error: ${res.status}`);
+        const data = await res.json();
+        if (!data || !Array.isArray(data.feeds)) return { channel: data?.channel, feeds: [] };
+        return data;
+      }
+
+      function synthesizeDemoFeeds(count, minutesSpan = 30) {
+        // Generates synthetic feeds around Johannesburg for demo/testing
+        const now = Date.now();
+        const feeds = [];
+        let lat = -26.2041;
+        let lng = 28.0473;
+        for (let i = count - 1; i >= 0; i--) {
+          const t = new Date(now - (i * (minutesSpan * 60 * 1000) / count));
+          lat += (Math.random() - 0.5) * 0.01;
+          lng += (Math.random() - 0.5) * 0.01;
+          const unauthorized = Math.random() < 0.15 ? 1 : 0;
+          const granted = unauthorized ? 0 : (Math.random() < 0.85 ? 1 : 0);
+          feeds.push({
+            created_at: t.toISOString(),
+            entry_id: i + 1,
+            field1: lat.toFixed(6),
+            field2: lng.toFixed(6),
+            field3: unauthorized.toString(),
+            field4: granted.toString()
+          });
+        }
+        return { channel: { id: Number(CHANNEL_ID) }, feeds };
+      }
+
+      // ===============================
+      // MAP INIT
+      // ===============================
+      let map, vehicleMarker, lastValidPosition = null;
+      function initMap() {
+        map = L.map('map', {
+          center: [MAP_INITIAL_CENTER.lat, MAP_INITIAL_CENTER.lng],
+          zoom: MAP_INITIAL_ZOOM,
+          zoomControl: true
+        });
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        vehicleMarker = L.marker([MAP_INITIAL_CENTER.lat, MAP_INITIAL_CENTER.lng], {
+          title: 'Vehicle Location'
+        }).addTo(map);
+        vehicleMarker.bindPopup('Location Unavailable');
+
+        const mapSpinner = document.getElementById('mapSpinner');
+        hide(mapSpinner);
+      }
+
+      // ===============================
+      // CHARTS INIT
+      // ===============================
+      let lineChart, pieChart;
+      function initCharts() {
+        const lineCtx = document.getElementById('lineChart').getContext('2d');
+        lineChart = new Chart(lineCtx, {
+          type: 'line',
+          data: { labels: [], datasets: [
+            {
+              label: 'Latitude', data: [], borderColor: '#8ab4ff', backgroundColor: 'rgba(138,180,255,0.15)', tension: 0.3, pointRadius: 2
+            },
+            {
+              label: 'Longitude', data: [], borderColor: '#f7b84b', backgroundColor: 'rgba(247,184,75,0.15)', tension: 0.3, pointRadius: 2
+            }
+          ]},
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: { ticks: { color: '#9aa2af' }, grid: { color: 'rgba(255,255,255,0.06)' } },
+              y: { ticks: { color: '#9aa2af' }, grid: { color: 'rgba(255,255,255,0.06)' } }
+            },
+            plugins: {
+              legend: { labels: { color: '#c9cdd6' } },
+              tooltip: { intersect: false, mode: 'index' }
+            }
+          }
+        });
+
+        const pieCtx = document.getElementById('pieChart').getContext('2d');
+        pieChart = new Chart(pieCtx, {
+          type: 'pie',
+          data: {
+            labels: ['Authorized', 'Unauthorized'],
+            datasets: [{ data: [0, 0], backgroundColor: ['rgba(32,201,151,0.6)', 'rgba(255,92,119,0.6)'], borderColor: ['#20c997', '#ff5c77'] }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { labels: { color: '#c9cdd6' } }
+            }
+          }
+        });
+
+        hide(document.getElementById('chartSpinner'));
+        hide(document.getElementById('pieSpinner'));
+      }
+
+      // ===============================
+      // UI UPDATE FUNCTIONS
+      // ===============================
+      function updateMapAndLocation(feedsSortedDesc) {
+        if (!feedsSortedDesc || feedsSortedDesc.length === 0) {
+          vehicleMarker.setPopupContent('Vehicle Offline');
+          vehicleMarker.openPopup();
+          setBadge(document.getElementById('locationBadge'), 'Vehicle Offline', 'danger');
+          setText(document.getElementById('gpsMeta'), 'No recent data');
+          return;
+        }
+        const latest = feedsSortedDesc[0];
+        const lat = parseNumber(latest.field1);
+        const lng = parseNumber(latest.field2);
+        if (lat !== null && lng !== null) {
+          lastValidPosition = { lat, lng };
+          vehicleMarker.setLatLng([lat, lng]);
+          vehicleMarker.setPopupContent(`Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}<br/><span class="xsmall-muted">Updated: ${formatDate(latest.created_at)}</span>`);
+          setBadge(document.getElementById('locationBadge'), 'GPS Locked', 'success');
+          setText(document.getElementById('latValue'), lat.toFixed(6));
+          setText(document.getElementById('lngValue'), lng.toFixed(6));
+          setText(document.getElementById('gpsMeta'), `Last fix: ${formatDate(latest.created_at)}`);
+        } else {
+          setBadge(document.getElementById('locationBadge'), 'Location Unavailable', 'warning');
+          setText(document.getElementById('latValue'), '—');
+          setText(document.getElementById('lngValue'), '—');
+          setText(document.getElementById('gpsMeta'), `Updated: ${formatDate(latest.created_at)}`);
+          if (lastValidPosition) {
+            vehicleMarker.setLatLng([lastValidPosition.lat, lastValidPosition.lng]);
+            vehicleMarker.setPopupContent('Last known position');
+          } else {
+            vehicleMarker.setLatLng([MAP_INITIAL_CENTER.lat, MAP_INITIAL_CENTER.lng]);
+            vehicleMarker.setPopupContent('Location Unavailable');
+          }
+        }
+      }
+
+      function updateAccessStatus(latest, last10FeedsDesc) {
+        const accessBadge = document.getElementById('accessStatusBadge');
+        const accessIcon = document.getElementById('accessIcon');
+        const accessText = document.getElementById('accessStatusText');
+        const onlineText = document.getElementById('vehicleOnlineText');
+
+        if (!latest) {
+          setBadge(accessBadge, 'Offline', 'danger');
+          accessIcon.innerHTML = '<i class="bi bi-x-octagon text-danger"></i>';
+          setText(accessText, 'Vehicle Offline');
+          setText(onlineText, 'No recent data');
+          return;
+        }
+
+        const granted = latest.field4 === '1' || latest.field4 === 1;
+        const unauthorized = latest.field3 === '1' || latest.field3 === 1;
+        if (granted) {
+          setBadge(accessBadge, 'Authorized', 'success');
+          accessIcon.innerHTML = '<i class="bi bi-check-circle text-success"></i>';
+          setText(accessText, 'Access Granted');
+          setText(onlineText, `Updated: ${formatDate(latest.created_at)}`);
+        } else {
+          setBadge(accessBadge, 'Unauthorized', 'danger');
+          accessIcon.innerHTML = '<i class="bi bi-shield-exclamation text-danger"></i>';
+          setText(accessText, 'Access Denied');
+          setText(onlineText, `Updated: ${formatDate(latest.created_at)}`);
+        }
+
+        // Intruder panel uses last 10 entries
+        const intruderBadge = document.getElementById('intruderBadge');
+        const intruderIcon = document.getElementById('intruderIcon');
+        const intruderText = document.getElementById('intruderText');
+        const intruderMeta = document.getElementById('intruderMeta');
+
+        const alerts = (last10FeedsDesc || []).filter(f => f.field3 === '1' || f.field3 === 1);
+        const lastAlert = alerts[0];
+        const alertCount = alerts.length;
+        if (alertCount > 0) {
+          setBadge(intruderBadge, 'Intruder Alert', 'danger');
+          intruderIcon.innerHTML = '<i class="bi bi-alarm-fill text-danger"></i>';
+          setText(intruderText, 'Intruder Alert!');
+          setText(intruderMeta, `Recent alerts (last 10): ${alertCount}${lastAlert ? ' • Last: ' + formatDate(lastAlert.created_at) : ''}`);
+        } else {
+          setBadge(intruderBadge, 'Clear', 'success');
+          intruderIcon.innerHTML = '<i class="bi bi-bell-slash-fill text-success"></i>';
+          setText(intruderText, 'No Intrusions Detected');
+          setText(intruderMeta, `Checked: ${formatDate(latest.created_at)}`);
+        }
+      }
+
+      function updateEventLog(feedsDesc) {
+        const tbody = document.getElementById('eventLogBody');
+        tbody.innerHTML = '';
+        if (!feedsDesc || feedsDesc.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" class="text-center small-muted">No recent data. Vehicle Offline.</td></tr>';
+          return;
+        }
+        feedsDesc.forEach(feed => {
+          const lat = parseNumber(feed.field1);
+          const lng = parseNumber(feed.field2);
+          const unauthorized = feed.field3 === '1' || feed.field3 === 1;
+          const granted = feed.field4 === '1' || feed.field4 === 1;
+          const tr = document.createElement('tr');
+          if (unauthorized || !granted) tr.classList.add('table-danger');
+          tr.innerHTML = `
+            <td class="xsmall-muted">${formatDate(feed.created_at)}</td>
+            <td>${lat !== null ? lat.toFixed(6) : '—'}</td>
+            <td>${lng !== null ? lng.toFixed(6) : '—'}</td>
+            <td>${granted ? createNote('Authorized', 'text-bg-success') : createNote('Denied', 'text-bg-danger')}</td>
+            <td>${unauthorized ? createNote('Intruder', 'text-bg-danger') : createNote('Normal', 'text-bg-secondary')}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+
+      function updateLineChart(last10Asc) {
+        const labels = last10Asc.map(f => new Date(f.created_at)).map(formatDate);
+        const latSeries = last10Asc.map(f => parseNumber(f.field1));
+        const lngSeries = last10Asc.map(f => parseNumber(f.field2));
+        lineChart.data.labels = labels;
+        lineChart.data.datasets[0].data = latSeries;
+        lineChart.data.datasets[1].data = lngSeries;
+        lineChart.update();
+      }
+
+      function updatePieChartFromFeeds(feedsDesc) {
+        const grantedCount = feedsDesc.filter(f => f.field4 === '1' || f.field4 === 1).length;
+        const deniedCount = feedsDesc.length - grantedCount;
+        pieChart.data.datasets[0].data = [grantedCount, deniedCount];
+        pieChart.update();
+      }
+
+      // ===============================
+      // DATA LOAD + POLLING
+      // ===============================
+      let pollTimer = null;
+      async function loadAll() {
+        // Show local spinners during refresh
+        show(document.getElementById('mapSpinner'));
+        show(document.getElementById('chartSpinner'));
+        show(document.getElementById('pieSpinner'));
+        show(document.getElementById('logSpinner'));
+
+        try {
+          // Fetch last 20 entries for map, status, line chart, and log
+          let data20;
+          try {
+            data20 = await fetchFeeds({ results: '20' });
+          } catch (e) {
+            if (DEMO_MODE) {
+              data20 = synthesizeDemoFeeds(20);
+            } else {
+              throw e;
+            }
+          }
+
+          const feeds20 = (data20.feeds || []).slice();
+          feeds20.sort(byLatestDescending);
+
+          const latest = feeds20[0];
+          // Update global last update text
+          setText(document.getElementById('lastUpdateGlobal'), 'Last update: ' + (latest ? formatDate(latest.created_at) : '—'));
+
+          // Map + location panel
+          updateMapAndLocation(feeds20);
+
+          // Access + intruder status using last 10
+          const last10Desc = feeds20.slice(0, 10);
+          updateAccessStatus(latest, last10Desc);
+
+          // Event log (last 20, newest first)
+          updateEventLog(feeds20);
+
+          // Line chart uses last 10 ascending time order
+          const last10Asc = last10Desc.slice().sort(byLatestAscending);
+          updateLineChart(last10Asc);
+
+          // Fetch last hour for pie chart
+          let dataHour;
+          try {
+            // Use minutes param to fetch last 60 minutes; cap results to avoid huge payload
+            dataHour = await fetchFeeds({ minutes: '60', results: '200' });
+          } catch (e) {
+            if (DEMO_MODE) {
+              dataHour = synthesizeDemoFeeds(50, 60);
+            } else {
+              throw e;
+            }
+          }
+          const feedsHour = (dataHour.feeds || []).slice().sort(byLatestDescending);
+          updatePieChartFromFeeds(feedsHour);
+
+        } catch (err) {
+          console.error(err);
+          // Surface user-friendly messages
+          setText(document.getElementById('lastUpdateGlobal'), 'Last update: error');
+          setBadge(document.getElementById('accessStatusBadge'), 'Error', 'danger');
+          document.getElementById('accessIcon').innerHTML = '<i class="bi bi-bug text-danger"></i>';
+          setText(document.getElementById('accessStatusText'), 'Unable to fetch data');
+          setText(document.getElementById('vehicleOnlineText'), err.message || 'Network error');
+          setBadge(document.getElementById('intruderBadge'), 'Unknown', 'warning');
+          document.getElementById('intruderIcon').innerHTML = '<i class="bi bi-bell text-warning"></i>';
+          setText(document.getElementById('intruderText'), 'Unknown');
+          setText(document.getElementById('intruderMeta'), 'No data');
+          setBadge(document.getElementById('locationBadge'), 'Unknown', 'warning');
+          setText(document.getElementById('gpsMeta'), '—');
+          updateEventLog([]);
+          if (lineChart) {
+            lineChart.data.labels = [];
+            lineChart.data.datasets[0].data = [];
+            lineChart.data.datasets[1].data = [];
+            lineChart.update();
+          }
+          if (pieChart) {
+            pieChart.data.datasets[0].data = [0, 0];
+            pieChart.update();
+          }
+        } finally {
+          hide(document.getElementById('mapSpinner'));
+          hide(document.getElementById('chartSpinner'));
+          hide(document.getElementById('pieSpinner'));
+          hide(document.getElementById('logSpinner'));
+        }
+      }
+
+      function startPolling() {
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = setInterval(loadAll, POLL_INTERVAL_MS);
+      }
+
+      // ===============================
+      // BOOTSTRAP APP
+      // ===============================
+      window.addEventListener('DOMContentLoaded', () => {
+        initMap();
+        initCharts();
+        loadAll().then(startPolling);
+        document.getElementById('refreshBtn').addEventListener('click', () => {
+          loadAll();
+        });
+      });
+    </script>
+  </body>
+</html>
+
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Vehicle Security IoT Dashboard</title>
 
     <!-- Bootstrap CSS -->
