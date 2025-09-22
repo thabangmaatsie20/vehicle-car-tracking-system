@@ -1,3 +1,670 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vehicle Security IoT Dashboard</title>
+
+    <!-- Bootstrap CSS -->
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+      crossorigin="anonymous"
+    />
+    <!-- Bootstrap Icons -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css"
+    />
+
+    <!-- Leaflet CSS -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+
+    <style>
+      html, body {
+        height: 100%;
+        background-color: #0b0d10;
+      }
+      .navbar-brand {
+        font-weight: 700;
+        letter-spacing: 0.3px;
+      }
+      #map {
+        width: 100%;
+        height: 52vh;
+        border-radius: 0.5rem;
+        overflow: hidden;
+      }
+      @media (max-width: 576px) {
+        #map { height: 46vh; }
+      }
+      .card {
+        background-color: #101319;
+        border: 1px solid rgba(255,255,255,0.06);
+      }
+      .table thead th {
+        position: sticky;
+        top: 0;
+        background-color: #121622;
+        z-index: 1;
+      }
+      .table-responsive {
+        max-height: 280px;
+      }
+      .row-compact { row-gap: 1rem; }
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 1rem;
+        padding: 0.35rem 0.6rem;
+        border-radius: 999px;
+      }
+      .status-badge .bi { font-size: 1.1rem; }
+      .overlay-center {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0,0,0,0.35);
+        color: #cfd8dc;
+        z-index: 400;
+        text-align: center;
+      }
+      .small-muted { color: #94a3b8; font-size: 0.9rem; }
+      .section-title { font-weight: 600; }
+      .map-wrapper { position: relative; }
+      .spinner-border-sm { --bs-spinner-width: 1rem; --bs-spinner-height: 1rem; }
+      .badge-soft {
+        background-color: rgba(255,255,255,0.06);
+        color: #cbd5e1;
+      }
+      .table-hover tbody tr:hover { background-color: rgba(255,255,255,0.03); }
+      .text-green { color: #22c55e !important; }
+      .text-red { color: #ef4444 !important; }
+      .border-top-subtle { border-top: 1px solid rgba(255,255,255,0.08); }
+    </style>
+  </head>
+  <body>
+    <!-- Top Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark border-bottom border-secondary-subtle">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="#">Vehicle Security Dashboard</a>
+        <div class="d-flex align-items-center gap-3 ms-auto">
+          <span id="lastUpdate" class="small text-secondary">Last update: —</span>
+          <button id="refreshBtn" class="btn btn-outline-light btn-sm">
+            <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <main class="container-fluid py-3">
+      <!-- Map Section -->
+      <div class="row mb-3">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-body p-2 p-sm-3">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="section-title mb-0">Map View</h6>
+                <span id="connectionStatus" class="badge badge-soft">Connecting…</span>
+              </div>
+              <div class="map-wrapper">
+                <div id="map"></div>
+                <div id="mapOverlay" class="overlay-center" style="display:none;">
+                  <div>
+                    <div class="spinner-border text-light mb-3" role="status"></div>
+                    <div id="mapOverlayText">Loading data…</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Status Cards -->
+      <div class="row row-compact mb-3">
+        <div class="col-12 col-lg-6">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-start mb-2">
+                <div>
+                  <h6 class="section-title mb-1">Access Status</h6>
+                  <div class="small-muted">Based on latest entry (Field 4)</div>
+                </div>
+                <span id="vehicleOnlineBadge" class="badge badge-soft">Status: Unknown</span>
+              </div>
+              <div id="accessStatus" class="d-flex align-items-center gap-2 fs-5">
+                <span class="text-secondary"><i class="bi bi-shield-lock"></i></span>
+                <span>Waiting for data…</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12 col-lg-6">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-start mb-2">
+                <div>
+                  <h6 class="section-title mb-1">Intruder Alerts</h6>
+                  <div class="small-muted">Field 3 over last 10 entries</div>
+                </div>
+                <span id="alertCountBadge" class="badge text-bg-danger" style="display:none;">0 Alerts</span>
+              </div>
+              <div id="intruderPanel" class="d-flex align-items-center gap-2 fs-5">
+                <span class="text-secondary"><i class="bi bi-bell"></i></span>
+                <span>No alerts detected.</span>
+              </div>
+              <div id="lastAlertTime" class="small text-secondary mt-2" style="display:none;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts -->
+      <div class="row row-compact mb-3">
+        <div class="col-12 col-lg-6">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="section-title mb-0">Location History (Last 10)</h6>
+                <span class="small-muted">Latitude and Longitude over time</span>
+              </div>
+              <canvas id="lineChart" height="160"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-lg-6">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="section-title mb-0">Access Stats (Last Hour)</h6>
+                <span class="small-muted">Authorized vs Unauthorized</span>
+              </div>
+              <canvas id="pieChart" height="160"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Event Log -->
+      <div class="row mb-4">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="section-title mb-0">Event Log (Last 20 Entries)</h6>
+                <span class="small-muted">Newest at top</span>
+              </div>
+              <div class="table-responsive border-top-subtle">
+                <table class="table table-sm table-hover align-middle mb-0" id="eventTable">
+                  <thead>
+                    <tr>
+                      <th style="width: 26%;">Timestamp</th>
+                      <th style="width: 18%;">Latitude</th>
+                      <th style="width: 18%;">Longitude</th>
+                      <th style="width: 18%;">Access</th>
+                      <th style="width: 20%;">Alert</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="container-fluid pb-4">
+      <div class="text-center text-secondary small">
+        Map data © <a href="https://www.openstreetmap.org/" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors • Tiles © <a href="https://carto.com/" target="_blank" rel="noopener noreferrer">CARTO</a>
+      </div>
+    </footer>
+
+    <!-- Leaflet JS -->
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <!-- Bootstrap JS -->
+    <script
+      src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+      integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+      crossorigin="anonymous"
+    ></script>
+
+    <script>
+      // ======== Configuration ========
+      // You can customize via URL query params: ?channel=1234567&readKey=ABCDEFGHIJKLMNOP
+      const DEFAULT_CHANNEL_ID = 1234567; // Example Channel ID (replace for production)
+      const DEFAULT_READ_API_KEY = "ABCDEFGHIJKLMNOP"; // Example Read Key (replace for production)
+      const API_POLL_INTERVAL_MS = 15000; // 15 seconds
+      const INITIAL_MAP_CENTER = { lat: -30, lng: 25 }; // South Africa
+      const OFFLINE_THRESHOLD_MINUTES = 5; // consider offline if no update within this
+
+      // ======== Helpers ========
+      const qs = new URLSearchParams(window.location.search);
+      const CHANNEL_ID = Number(qs.get('channel')) || DEFAULT_CHANNEL_ID;
+      const READ_API_KEY = (qs.get('readKey') || DEFAULT_READ_API_KEY).trim();
+
+      function thingspeakFeedsUrl(results = 100) {
+        const base = `https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.json`;
+        const params = new URLSearchParams({ api_key: READ_API_KEY, results: String(results) });
+        return `${base}?${params.toString()}`;
+      }
+
+      function parseNumber(value) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+      }
+
+      function formatTimestamp(ts) {
+        if (!ts) return '—';
+        try {
+          const d = new Date(ts);
+          if (isNaN(d.getTime())) return ts;
+          return d.toLocaleString();
+        } catch { return ts; }
+      }
+
+      function minutesSince(ts) {
+        const d = new Date(ts);
+        if (isNaN(d.getTime())) return Infinity;
+        return (Date.now() - d.getTime()) / 60000;
+      }
+
+      function isValidLatLng(lat, lng) {
+        return lat !== null && lng !== null && lat <= 90 && lat >= -90 && lng <= 180 && lng >= -180;
+      }
+
+      // ======== State ========
+      let leafletMap = null;
+      let vehicleMarker = null;
+      let mapInitialized = false;
+      let lineChart = null;
+      let pieChart = null;
+      let firstLoad = true;
+      let lastKnownCoords = null;
+
+      // ======== UI Elements ========
+      const els = {};
+      function cacheEls() {
+        els.map = document.getElementById('map');
+        els.mapOverlay = document.getElementById('mapOverlay');
+        els.mapOverlayText = document.getElementById('mapOverlayText');
+        els.connectionStatus = document.getElementById('connectionStatus');
+        els.lastUpdate = document.getElementById('lastUpdate');
+        els.refreshBtn = document.getElementById('refreshBtn');
+        els.accessStatus = document.getElementById('accessStatus');
+        els.vehicleOnlineBadge = document.getElementById('vehicleOnlineBadge');
+        els.intruderPanel = document.getElementById('intruderPanel');
+        els.alertCountBadge = document.getElementById('alertCountBadge');
+        els.lastAlertTime = document.getElementById('lastAlertTime');
+        els.eventTableBody = document.querySelector('#eventTable tbody');
+        els.lineChart = document.getElementById('lineChart');
+        els.pieChart = document.getElementById('pieChart');
+      }
+
+      // ======== Map ========
+      function initMap() {
+        leafletMap = L.map('map', {
+          center: [INITIAL_MAP_CENTER.lat, INITIAL_MAP_CENTER.lng],
+          zoom: 5,
+          zoomControl: true
+        });
+        // Dark tiles
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+          subdomains: 'abcd',
+          maxZoom: 19
+        }).addTo(leafletMap);
+        mapInitialized = true;
+      }
+
+      function updateMap(lat, lng, label) {
+        if (!mapInitialized) return;
+        if (!isValidLatLng(lat, lng)) {
+          // Show overlay indicating location unavailable
+          els.mapOverlayText.textContent = 'Location Unavailable';
+          els.mapOverlay.style.display = 'flex';
+          return;
+        }
+        els.mapOverlay.style.display = 'none';
+
+        const latLng = [lat, lng];
+        if (!vehicleMarker) {
+          vehicleMarker = L.marker(latLng).addTo(leafletMap);
+          leafletMap.setView(latLng, 12);
+        } else {
+          vehicleMarker.setLatLng(latLng);
+          // Smooth pan without changing zoom if movement is significant
+          const panIfFar = !lastKnownCoords || Math.abs(lastKnownCoords.lat - lat) > 0.01 || Math.abs(lastKnownCoords.lng - lng) > 0.01;
+          if (panIfFar) {
+            leafletMap.panTo(latLng, { animate: true, duration: 0.8 });
+          }
+        }
+        lastKnownCoords = { lat, lng };
+
+        const popupHtml = `<div><strong>Vehicle Location</strong><br/>Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}<br/><span class="text-secondary">${label}</span></div>`;
+        vehicleMarker.bindPopup(popupHtml);
+      }
+
+      // ======== Charts ========
+      function initCharts() {
+        // Line chart with two datasets (lat, lng)
+        lineChart = new Chart(els.lineChart, {
+          type: 'line',
+          data: {
+            labels: [],
+            datasets: [
+              {
+                label: 'Latitude',
+                data: [],
+                borderColor: '#60a5fa',
+                backgroundColor: 'rgba(96,165,250,0.15)',
+                tension: 0.3,
+                pointRadius: 2
+              },
+              {
+                label: 'Longitude',
+                data: [],
+                borderColor: '#f472b6',
+                backgroundColor: 'rgba(244,114,182,0.15)',
+                tension: 0.3,
+                pointRadius: 2
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: { ticks: { color: '#94a3b8' } },
+              y: { ticks: { color: '#94a3b8' } }
+            },
+            plugins: {
+              legend: { labels: { color: '#cbd5e1' } }
+            }
+          }
+        });
+
+        // Pie chart for access stats
+        pieChart = new Chart(els.pieChart, {
+          type: 'pie',
+          data: {
+            labels: ['Authorized', 'Unauthorized'],
+            datasets: [
+              {
+                label: 'Access',
+                data: [0, 0],
+                backgroundColor: ['#22c55e', '#ef4444']
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { labels: { color: '#cbd5e1' } }
+            }
+          }
+        });
+      }
+
+      function updateLineChart(points) {
+        // points: array of { t: string, lat: number|null, lng: number|null }
+        const labels = points.map(p => new Date(p.t)).map(d => d.toLocaleTimeString());
+        const latSeries = points.map(p => p.lat);
+        const lngSeries = points.map(p => p.lng);
+        lineChart.data.labels = labels;
+        lineChart.data.datasets[0].data = latSeries;
+        lineChart.data.datasets[1].data = lngSeries;
+        lineChart.update('none');
+      }
+
+      function updatePieChart(authorizedCount, unauthorizedCount) {
+        pieChart.data.datasets[0].data = [authorizedCount, unauthorizedCount];
+        pieChart.update('none');
+      }
+
+      // ======== Event Log ========
+      function renderEventLog(rows) {
+        // rows: array of { t, lat, lng, statusText, alertText, unauthorized }
+        els.eventTableBody.innerHTML = '';
+        const frag = document.createDocumentFragment();
+        rows.forEach(row => {
+          const tr = document.createElement('tr');
+          if (row.unauthorized) tr.classList.add('table-danger');
+          tr.innerHTML = `
+            <td>${row.t}</td>
+            <td>${row.lat}</td>
+            <td>${row.lng}</td>
+            <td>${row.statusText}</td>
+            <td>${row.alertText}</td>
+          `;
+          frag.appendChild(tr);
+        });
+        els.eventTableBody.appendChild(frag);
+      }
+
+      // ======== Data Fetching ========
+      async function fetchFeeds(results = 200) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12000);
+        try {
+          const res = await fetch(thingspeakFeedsUrl(results), { signal: controller.signal, cache: 'no-store' });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const json = await res.json();
+          return json;
+        } catch (err) {
+          console.warn('Fetch error, using demo data fallback:', err);
+          return demoData();
+        } finally { clearTimeout(timeout); }
+      }
+
+      // ======== Demo Data (fallback when API unreachable) ========
+      function demoData() {
+        const now = Date.now();
+        const feeds = [];
+        let baseLat = -26.2041; // Johannesburg
+        let baseLng = 28.0473;
+        for (let i = 0; i < 30; i++) {
+          const t = new Date(now - i * 30000); // 30s apart
+          const jitterLat = baseLat + (Math.sin(i/3) * 0.002);
+          const jitterLng = baseLng + (Math.cos(i/2) * 0.002);
+          const alert = (i % 11 === 0) ? '1' : '0';
+          const access = (i % 5 === 0) ? '0' : '1';
+          feeds.unshift({
+            created_at: t.toISOString(),
+            entry_id: i + 1,
+            field1: String(jitterLat.toFixed(6)),
+            field2: String(jitterLng.toFixed(6)),
+            field3: alert,
+            field4: access
+          });
+        }
+        return {
+          channel: { id: CHANNEL_ID, name: 'Demo Channel' },
+          feeds
+        };
+      }
+
+      // ======== UI Updates from Data ========
+      function setConnectionStatus(text, tone = 'secondary') {
+        els.connectionStatus.className = `badge text-bg-${tone}`;
+        els.connectionStatus.textContent = text;
+      }
+
+      function setVehicleOnlineBadge(text, tone = 'secondary') {
+        els.vehicleOnlineBadge.className = `badge text-bg-${tone}`;
+        els.vehicleOnlineBadge.textContent = text;
+      }
+
+      function setAccessStatus(isAuthorized) {
+        els.accessStatus.innerHTML = '';
+        const icon = document.createElement('i');
+        icon.className = `bi ${isAuthorized ? 'bi-check-circle-fill text-green' : 'bi-x-circle-fill text-red'}`;
+        const text = document.createElement('span');
+        text.textContent = isAuthorized ? 'Authorized' : 'Unauthorized';
+        els.accessStatus.append(icon, text);
+      }
+
+      function setIntruderPanel(hasAlert, count, lastTs) {
+        els.intruderPanel.innerHTML = '';
+        const icon = document.createElement('i');
+        icon.className = `bi ${hasAlert ? 'bi-exclamation-triangle-fill text-red' : 'bi-bell text-secondary'}`;
+        const text = document.createElement('span');
+        text.textContent = hasAlert ? 'Intruder Alert!' : 'No alerts detected.';
+        els.intruderPanel.append(icon, text);
+
+        if (count > 0) {
+          els.alertCountBadge.style.display = '';
+          els.alertCountBadge.textContent = `${count} Alert${count === 1 ? '' : 's'}`;
+          els.lastAlertTime.style.display = '';
+          els.lastAlertTime.textContent = `Last alert: ${formatTimestamp(lastTs)}`;
+        } else {
+          els.alertCountBadge.style.display = 'none';
+          els.lastAlertTime.style.display = 'none';
+        }
+      }
+
+      function buildEventRows(feeds) {
+        const rows = [];
+        feeds.forEach(f => {
+          const lat = parseNumber(f.field1);
+          const lng = parseNumber(f.field2);
+          const unauthorizedAlert = String(f.field3 || '0') === '1';
+          const authorized = String(f.field4 || '0') === '1';
+          rows.push({
+            t: formatTimestamp(f.created_at),
+            lat: (lat === null ? '—' : lat.toFixed(5)),
+            lng: (lng === null ? '—' : lng.toFixed(5)),
+            statusText: authorized ? '<span class="text-green">Authorized</span>' : '<span class="text-red">Unauthorized</span>',
+            alertText: unauthorizedAlert ? '<span class="text-red">Intruder</span>' : '—',
+            unauthorized: !authorized
+          });
+        });
+        return rows;
+      }
+
+      // ======== Core Update Cycle ========
+      async function updateAll() {
+        if (firstLoad) {
+          els.mapOverlayText.textContent = 'Loading latest data…';
+          els.mapOverlay.style.display = 'flex';
+          setConnectionStatus('Connecting…', 'secondary');
+        }
+
+        const data = await fetchFeeds(200);
+        const feeds = Array.isArray(data?.feeds) ? data.feeds : [];
+
+        if (feeds.length === 0) {
+          setConnectionStatus('No data', 'secondary');
+          setVehicleOnlineBadge('Vehicle Offline', 'secondary');
+          setAccessStatus(false);
+          setIntruderPanel(false, 0, null);
+          els.lastUpdate.textContent = 'Last update: —';
+          els.mapOverlayText.textContent = 'No data available';
+          els.mapOverlay.style.display = 'flex';
+          return;
+        }
+
+        // Latest entry
+        const latest = feeds[feeds.length - 1];
+        const latestLat = parseNumber(latest.field1);
+        const latestLng = parseNumber(latest.field2);
+        const latestAuthorized = String(latest.field4 || '0') === '1';
+        const latestAlert = String(latest.field3 || '0') === '1';
+        const latestTs = latest.created_at;
+
+        // Online/offline
+        const mins = minutesSince(latestTs);
+        const isOffline = mins > OFFLINE_THRESHOLD_MINUTES;
+        setVehicleOnlineBadge(isOffline ? 'Vehicle Offline' : 'Vehicle Online', isOffline ? 'secondary' : 'success');
+        setConnectionStatus(isOffline ? `Stale (${Math.floor(mins)}m ago)` : 'Live', isOffline ? 'warning' : 'primary');
+        els.lastUpdate.textContent = `Last update: ${formatTimestamp(latestTs)}`;
+
+        // Map
+        updateMap(latestLat, latestLng, `Updated: ${formatTimestamp(latestTs)}`);
+
+        // Intruder alerts over last 10 entries
+        const recent10 = feeds.slice(-10);
+        const recentAlerts = recent10.filter(f => String(f.field3 || '0') === '1');
+        const lastAlertTs = recentAlerts.length ? recentAlerts[recentAlerts.length - 1].created_at : null;
+        setIntruderPanel(latestAlert, recentAlerts.length, lastAlertTs);
+
+        // Access status
+        setAccessStatus(latestAuthorized);
+
+        // Event log last 20 (newest first)
+        const last20 = feeds.slice(-20).reverse();
+        renderEventLog(buildEventRows(last20));
+
+        // Charts
+        const locationPoints = recent10.map(f => ({
+          t: f.created_at,
+          lat: parseNumber(f.field1),
+          lng: parseNumber(f.field2)
+        }));
+        updateLineChart(locationPoints);
+
+        // Pie: last hour access counts
+        const oneHourAgo = Date.now() - 60 * 60000;
+        const lastHour = feeds.filter(f => new Date(f.created_at).getTime() >= oneHourAgo);
+        const authCount = lastHour.filter(f => String(f.field4 || '0') === '1').length;
+        const unauthCount = lastHour.filter(f => String(f.field4 || '0') !== '1').length;
+        updatePieChart(authCount, unauthCount);
+
+        if (firstLoad) {
+          els.mapOverlay.style.display = 'none';
+          firstLoad = false;
+        }
+      }
+
+      // ======== Init ========
+      function init() {
+        cacheEls();
+        initMap();
+        initCharts();
+
+        // First update immediately
+        updateAll();
+
+        // Polling
+        setInterval(() => {
+          updateAll();
+        }, API_POLL_INTERVAL_MS);
+
+        // Manual refresh
+        els.refreshBtn.addEventListener('click', () => {
+          els.refreshBtn.disabled = true;
+          const iconHtml = els.refreshBtn.innerHTML;
+          els.refreshBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> Refreshing';
+          updateAll().finally(() => {
+            els.refreshBtn.disabled = false;
+            els.refreshBtn.innerHTML = iconHtml;
+          });
+        });
+      }
+
+      document.addEventListener('DOMContentLoaded', init);
+    </script>
+  </body>
+  </html>
+
 
 <!DOCTYPE html>
 <html lang="en">
