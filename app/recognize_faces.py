@@ -67,9 +67,25 @@ def load_encodings(path: str) -> KnownEncodings:
 
 
 def open_video_source(source: str | int) -> cv2.VideoCapture:
-    cap = cv2.VideoCapture(source)
+    """Open a video source.
+
+    - int or "/dev/videoX": use V4L2
+    - GStreamer pipeline string (contains '!' and 'appsink'): use CAP_GSTREAMER
+    - otherwise: default backend (file path or URL)
+    """
+    cap: cv2.VideoCapture
+    if isinstance(source, int) or (isinstance(source, str) and source.startswith("/dev/video")):
+        cap = cv2.VideoCapture(source, cv2.CAP_V4L2)
+    elif isinstance(source, str) and ("!" in source and "appsink" in source):
+        cap = cv2.VideoCapture(source, cv2.CAP_GSTREAMER)
+    else:
+        cap = cv2.VideoCapture(source)
+
     if not cap.isOpened():
-        raise RuntimeError(f"Failed to open video source: {source}")
+        hint = ""
+        if isinstance(source, str) and ("!" in source and "appsink" in source):
+            hint = " (ensure OpenCV has GStreamer support; try `sudo apt install python3-opencv`)"
+        raise RuntimeError(f"Failed to open video source: {source}{hint}")
     return cap
 
 
