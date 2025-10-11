@@ -36,6 +36,14 @@ class RecognitionConfig:
     display_scale: float = 1.0  # scale for display window
     skip_frames: int = 0  # number of frames to skip between recognitions
     show_fps: bool = True
+    # Headless / output & logging options
+    headless: bool = False
+    output_video: str | None = None
+    output_frames_dir: str | None = None
+    frame_save_interval: float = 1.0
+    max_frames: int = 0  # 0 = unlimited
+    debug: bool = False
+    log_interval: float = 2.0
 
 
 @dataclass
@@ -112,21 +120,45 @@ def maybe_put_fps(frame, fps: float, show: bool):
 
 
 def recognize_stream(cfg: RecognitionConfig):
+    print(f"Loading encodings from: {cfg.encodings_path}")
     known = load_encodings(cfg.encodings_path)
+    print(
+        f"Loaded {len(known.encodings)} encodings for {len(set(known.names))} identities"
+    )
 
+    print(f"Opening video source: {cfg.source}")
     cap = open_video_source(cfg.source)
+
+    # Source metadata (may be 0 for webcams)
+    src_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    src_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    src_fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+    if src_width and src_height:
+        print(f"Source size: {src_width}x{src_height} @ {src_fps or 'unknown'} FPS")
 
     process_frame_index = 0
     fps_smoother = 0.0
     t_last = time.time()
+    last_save_ts = t_last
+    last_log_ts = t_last
+    frame_count = 0
+    gui_error_warned = False
+    headless_mode = bool(cfg.headless)
+    writer = None
 
     authorized_color = (0, 200, 0)
     unknown_color = (0, 0, 200)
 
+    # Prepare frame output directory if requested
+    if cfg.output_frames_dir:
+        os.makedirs(cfg.output_frames_dir, exist_ok=True)
+
     while True:
         ok, frame = cap.read()
         if not ok:
+            print("End of stream or cannot read from source.")
             break
+        frame_count += 1
 
         # Optionally downscale for faster processing
         small_frame = frame
@@ -192,6 +224,47 @@ def recognize_stream(cfg: RecognitionConfig):
 
         maybe_put_fps(frame, fps_smoother, cfg.show_fps)
 
+        # Initialize video writer lazily when first frame is available
+        if cfg.output_video and writer is None:
+            out_path = cfg.output_video
+            out_dir = os.path.dirname(out_path)
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
+            h, w = frame.shape[:2]
+            fps_out = src_fps if src_fps and src_fps > 0 else 20.0
+            fourcc = (
+                cv2.VideoWriter_fourcc(*"mp4v")
+                if out_path.lower().endswith(".mp4")
+                else cv2.VideoWriter_fourcc(*"XVID")
+            )
+            writer = cv2.VideoWriter(out_path, fourcc, fps_out, (w, h))
+            if writer is None or not writer.isOpened():
+                print(f"Warning: failed to open video writer at '{out_path}'.")
+                writer = None
+
+        if writer is not None:
+            writer.write(frame)
+
+        # Optionally save frames periodically
+        if cfg.output_frames_dir:
+            now_ts = time.time()
+            if now_ts - last_save_ts >= max(cfg.frame_save_interval, 0.01):
+                ts = time.strftime("%Y%m%d-%H%M%S")
+                out_name = f"frame_{ts}_{frame_count:06d}.jpg"
+                out_file = os.path.join(cfg.output_frames_dir, out_name)
+                cv2.imwrite(out_file, frame)
+                last_save_ts = now_ts
+
+        # Periodic logging in debug mode
+        if cfg.debug:
+            now_ts = time.time()
+            if now_ts - last_log_ts >= max(cfg.log_interval, 0.1):
+                names_str = ", ".join(n for n in names_this_frame if n != "Unknown") or "none"
+                print(
+                    f"Frame {frame_count}: faces={len(locations_this_frame)}; known={names_str}; fps={fps_smoother:.1f}"
+                )
+                last_log_ts = now_ts
+
         # Optionally scale for display
         display_frame = frame
         if cfg.display_scale and cfg.display_scale != 1.0:
@@ -203,13 +276,27 @@ def recognize_stream(cfg: RecognitionConfig):
                 interpolation=cv2.INTER_LINEAR,
             )
 
-        cv2.imshow("Face Recognition", display_frame)
-        key = cv2.waitKey(1) & 0xFF
-        if key in (27, ord("q")):  # ESC or 'q'
+        if not headless_mode:
+            try:
+                cv2.imshow("Face Recognition", display_frame)
+                key = cv2.waitKey(1) & 0xFF
+                if key in (27, ord("q")):  # ESC or 'q'
+                    break
+            except cv2.error:
+                if not gui_error_warned:
+                    print(
+                        "GUI not available; continuing in headless mode. Use --headless to hide this message."
+                    )
+                    gui_error_warned = True
+                headless_mode = True
+
+        if cfg.max_frames > 0 and frame_count >= cfg.max_frames:
             break
 
     cap.release()
     cv2.destroyAllWindows()
+    if writer is not None:
+        writer.release()
 
 
 def parse_args(argv: List[str]) -> RecognitionConfig:
@@ -266,6 +353,45 @@ def parse_args(argv: List[str]) -> RecognitionConfig:
         action="store_true",
         help="Disable FPS overlay",
     )
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run without GUI window (use logging/output options)",
+    )
+    parser.add_argument(
+        "--output-video",
+        default=None,
+        help="Path to save annotated video (e.g., out.mp4)",
+    )
+    parser.add_argument(
+        "--output-frames",
+        dest="output_frames_dir",
+        default=None,
+        help="Directory to periodically save annotated frames as JPGs",
+    )
+    parser.add_argument(
+        "--frame-save-interval",
+        type=float,
+        default=1.0,
+        help="Seconds between saved frames when --output-frames is set",
+    )
+    parser.add_argument(
+        "--max-frames",
+        type=int,
+        default=0,
+        help="Process at most N frames (0 = unlimited)",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable per-interval logging of detections and FPS",
+    )
+    parser.add_argument(
+        "--log-interval",
+        type=float,
+        default=2.0,
+        help="Seconds between log prints when --debug is enabled",
+    )
 
     args = parser.parse_args(argv)
 
@@ -286,6 +412,13 @@ def parse_args(argv: List[str]) -> RecognitionConfig:
         display_scale=args.display_scale,
         skip_frames=args.skip_frames,
         show_fps=not args.no_fps,
+        headless=args.headless,
+        output_video=args.output_video,
+        output_frames_dir=args.output_frames_dir,
+        frame_save_interval=args.frame_save_interval,
+        max_frames=args.max_frames,
+        debug=args.debug,
+        log_interval=args.log_interval,
     )
 
 
