@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FaceAccess Dashboard</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    #app { display: grid; grid-template-columns: 1fr 340px; grid-template-rows: auto 1fr; height: 100%; }
+    header { grid-column: 1 / -1; padding: 10px 14px; background: #111; color: #fff; display: flex; justify-content: space-between; align-items: center; }
+    #map { height: 100%; }
+    #side { border-left: 1px solid #ddd; overflow: auto; }
+    .event { padding: 10px 12px; border-bottom: 1px solid #eee; }
+    .event h4 { margin: 0 0 4px; font-size: 14px; }
+    .tag { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 12px; margin-right: 6px; }
+    .gps { background: #e8f4ff; color: #036; }
+    .rec { background: #efe; color: #262; }
+    .unknown { background: #fee; color: #822; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div><strong>FaceAccess</strong> — Live Telemetry</div>
+      <div id="status">connecting…</div>
+    </header>
+    <div id="map"></div>
+    <div id="side"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([0, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+    }).addTo(map);
+
+    const path = L.polyline([], {color: '#1976d2'}).addTo(map);
+    const markers = [];
+
+    function addEvent(evt) {
+      const side = document.getElementById('side');
+      const div = document.createElement('div');
+      div.className = 'event';
+      const ts = new Date(evt.timestamp_iso).toLocaleString();
+      if (evt.kind === 'gps') {
+        const p = evt.payload;
+        if (p.valid && typeof p.lat === 'number' && typeof p.lon === 'number') {
+          path.addLatLng([p.lat, p.lon]);
+          if (path.getLatLngs().length === 1) map.setView([p.lat, p.lon], 16);
+        }
+        div.innerHTML = `<span class="tag gps">GPS</span> ${ts} — ${p.lat?.toFixed?.(5) ?? ''}, ${p.lon?.toFixed?.(5) ?? ''} — sats: ${p.num_satellites ?? ''} — v: ${p.speed_kmh?.toFixed?.(1) ?? ''} km/h`;
+      } else if (evt.kind === 'recognition') {
+        const p = evt.payload;
+        if (typeof p.lat === 'number' && typeof p.lon === 'number') {
+          const m = L.marker([p.lat, p.lon]).addTo(map);
+          m.bindPopup(`<b>${p.name}</b><br>${ts}`);
+          markers.push(m);
+        }
+        const tag = p.name === 'Unknown' ? 'tag unknown' : 'tag rec';
+        div.innerHTML = `<span class="${tag}">${p.name === 'Unknown' ? 'Unknown' : 'Recognized'}</span> ${ts} — ${p.name}${p.lat ? ` @ ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}` : ''}`;
+      }
+      side.prepend(div);
+    }
+
+    async function boot() {
+      // fetch recent
+      const r = await fetch('/api/events');
+      const recent = await r.json();
+      recent.forEach(addEvent);
+
+      const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const ws = new WebSocket(`${wsProto}://${location.host}/ws`);
+      const statusEl = document.getElementById('status');
+      ws.onopen = () => statusEl.textContent = 'live';
+      ws.onclose = () => statusEl.textContent = 'disconnected';
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'recent') {
+            msg.events.forEach(addEvent);
+          } else if (msg.kind) {
+            addEvent(msg);
+          }
+        } catch {}
+      };
+    }
+
+    boot();
+  </script>
+</body>
+</html>
